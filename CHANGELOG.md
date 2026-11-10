@@ -1,5 +1,15 @@
 # Changelog
 
+## [Não lançado]
+
+- **Novo — coluna Usuário no painel:** mostra a conta da credencial que o `git push` de cada slot vai
+  usar (o `username` do helper; o usuário de uma URL ssh; `_(local)_` para remoto local). Fica logo
+  depois de Repo nas duas tabelas. O cabeçalho vem de `userLabel` em `wt.config.json` (padrão `Usuário`;
+  `""` esconde a coluna). Só o username é exibido: nunca e-mail, `user.name` nem a senha do helper.
+  Uma consulta ao helper por (repo, URL) por painel.
+- Testes: `tests/Test-User.ps1` (U0–U17, 18 verificações); `tests/Test-Config.ps1` ganha C7–C9
+  (padrão, `userLabel` custom e vazio).
+
 ## [0.1.0] — não publicada
 Pronta para publicação (sem pendências em `ISSUES.md`).
 Primeira versão como projeto: os scripts deixam de "nascer" do Apêndice A da referência e passam a
