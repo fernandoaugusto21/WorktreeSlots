@@ -41,6 +41,7 @@ $r = Run 'Attach-WtSlot.ps1' @('-Repo', 'demo', '-Branch', 'fb-id-7', '-Purpose'
 $panel = if (Test-Path "$pool\README.md") { Get-Content "$pool\README.md" -Raw } else { '' }
 Check 'C1' 'WT_CONFIG: pool, perfis e faixa (fb -> g2)' ($r.Exit -eq 0 -and (Test-Path "$pool\g2\.git") -and -not (Test-Path "$pool\g1")) $r.Out
 Check 'C2' 'rótulo da coluna e id extraído no painel' ($panel -match '\| Pesquisa \|' -and $panel -match 'ID-7' -and $panel -match 'com espaço e acento') $panel
+Check 'C7' 'userLabel padrão: "Usuário" logo depois de Repo nas duas tabelas' ($panel -match '\| Repo \| Usuário \| Estado' -and $panel -match '\| Repo \| Usuário \| Caminho') $panel
 $r = Run 'Attach-WtSlot.ps1' @('-Repo', 'demo', '-Branch', 'hf-x', '-Slot', 'g3', '-NoFetch')
 Check 'C3' 'hf fora da faixa recusado' ($r.Exit -ne 0 -and -not (Test-Path "$pool\g3\.git")) $r.Out
 $r = Run 'Attach-WtSlot.ps1' @('-Repo', 'demo', '-Branch', 'doc-x', '-NoFetch')
@@ -51,6 +52,16 @@ $bad | ConvertTo-Json -Depth 5 | Set-Content "$cfgDir\bad.json" -Encoding utf8No
 $env:WT_CONFIG = "$cfgDir\bad.json"
 $r = Run 'Update-WtStatus.ps1' @('-NoFetch')
 Check 'C5' 'chave desconhecida no JSON recusada' ($r.Exit -ne 0 -and $r.Out -match 'poolDirr') $r.Out
+
+# userLabel custom e vazio (o padrão é C7)
+$cfg['userLabel'] = 'User'; $cfg | ConvertTo-Json -Depth 5 | Set-Content "$cfgDir\user-custom.json" -Encoding utf8NoBOM
+$cfg['userLabel'] = ''; $cfg | ConvertTo-Json -Depth 5 | Set-Content "$cfgDir\user-empty.json" -Encoding utf8NoBOM
+$env:WT_CONFIG = "$cfgDir\user-custom.json"
+$r = Run 'Update-WtStatus.ps1' @('-NoFetch'); $pc = Get-Content "$pool\README.md" -Raw
+Check 'C8' 'userLabel custom: cabeçalho "User" nas duas tabelas' ($r.Exit -eq 0 -and $pc -match '\| Repo \| User \| Estado' -and $pc -match '\| Repo \| User \| Caminho' -and $pc -notmatch 'Usuário') $r.Out
+$env:WT_CONFIG = "$cfgDir\user-empty.json"
+$r = Run 'Update-WtStatus.ps1' @('-NoFetch'); $pe = Get-Content "$pool\README.md" -Raw
+Check 'C9' 'userLabel "": coluna escondida nas duas tabelas' ($r.Exit -eq 0 -and $pe -match '\| Repo \| Estado \|' -and $pe -notmatch 'Usuário' -and $pe -notmatch '\| User \|') $r.Out
 
 Remove-Item Env:WT_CONFIG
 $side = [ordered]@{ poolDir = '../pool2'; profilesDir = '../cfg/profiles' }
