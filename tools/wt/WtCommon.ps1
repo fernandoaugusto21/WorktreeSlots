@@ -22,13 +22,14 @@ $script:WtScriptsRel    = $PSScriptRoot                          # usado só nos
 $script:WtSlotPolicy    = @()
 $script:WtSlotPolicyStrict = $true                               # branch sem regra: $true = recusa; $false = qualquer slot
 $script:WtTicketLabel   = 'Ticket'                               # cabeçalho da coluna do id extraído da branch (TicketFromBranch)
+$script:WtUserLabel     = 'Usuário'                              # cabeçalho da coluna da conta da credencial do push ('' = esconder)
 # ====================================================================================
 
 # Configuração por instalação: wt.config.json sobrepõe os valores acima, sem editar este arquivo.
 # Procura em $env:WT_CONFIG (caminho do arquivo; usado por atalhos que chamam o motor de outra pasta)
 # e depois ao lado dos scripts. Caminhos relativos valem a partir da pasta do JSON.
 $script:WtConfigKeys = @('engineDir', 'poolDir', 'profilesDir', 'slotPrefix', 'slotCount', 'hideWorktrees',
-    'lockTimeoutSec', 'scriptsLabel', 'ticketLabel', 'slotPolicy', 'slotPolicyStrict')
+    'lockTimeoutSec', 'scriptsLabel', 'ticketLabel', 'userLabel', 'slotPolicy', 'slotPolicyStrict')
 $script:WtConfigPath = ''
 function Import-WtConfig {
     $path = if ($env:WT_CONFIG) { $env:WT_CONFIG } else { Join-Path $PSScriptRoot 'wt.config.json' }
@@ -51,6 +52,7 @@ function Import-WtConfig {
     if ($cfg.ContainsKey('lockTimeoutSec'))   { $script:WtLockTimeoutSec = [int]$cfg.lockTimeoutSec }
     if ($cfg.ContainsKey('scriptsLabel'))     { $script:WtScriptsRel = [string]$cfg.scriptsLabel }
     if ($cfg.ContainsKey('ticketLabel'))      { $script:WtTicketLabel = [string]$cfg.ticketLabel }
+    if ($cfg.ContainsKey('userLabel'))        { $script:WtUserLabel = [string]$cfg.userLabel }
     if ($cfg.ContainsKey('slotPolicyStrict')) { $script:WtSlotPolicyStrict = [bool]$cfg.slotPolicyStrict }
     if ($cfg.ContainsKey('slotPolicy')) {
         $script:WtSlotPolicy = @(foreach ($r in @($cfg.slotPolicy)) {
@@ -479,6 +481,121 @@ function Get-WtSync([string]$Path, [string]$Branch, $Prof) {
     return ($parts -join ' · ')
 }
 
+# ---------------------------------------------------------------- conta da credencial (coluna Usuário)
+
+function Get-WtConfigMap([string]$Dir) {
+    # `git config --list` numa chamada só: chave -> valor (o último vence, como no git).
+    $map = @{}
+    $r = Invoke-Git -Dir $Dir -GitArgs @('config', '--list') -AllowFail
+    if (-not $r.Ok) { return $map }
+    foreach ($l in $r.Lines) {
+        $i = $l.IndexOf('=')
+        if ($i -lt 0) { $map[$l] = 'true' } else { $map[$l.Substring(0, $i)] = $l.Substring($i + 1) }
+    }
+    return $map
+}
+
+function Get-WtPushRemote([hashtable]$Cfg, [string]$Branch, $Prof) {
+    # Remote do push, na ordem do git: pushRemote da branch, remote.pushDefault, remote da branch, origin e
+    # Remote do perfil. Vale o primeiro que existe no repo ('' se nenhum).
+    $cands = @()
+    if ($Branch) { $cands += $Cfg["branch.$Branch.pushRemote"] }
+    $cands += $Cfg['remote.pushDefault']
+    if ($Branch) { $cands += $Cfg["branch.$Branch.remote"] }
+    $cands += 'origin'
+    if ($Prof) { $cands += $Prof.Remote }
+    foreach ($c in $cands) {
+        if ($c -and ($Cfg.ContainsKey("remote.$c.url") -or $Cfg.ContainsKey("remote.$c.pushurl"))) { return $c }
+    }
+    return ''
+}
+
+function Invoke-WtCredentialFill([string]$Dir, [string]$Payload) {
+    # `git credential fill` sem prompt, sem janela e com limite de 10 s. Devolve só o username ('' se não houver).
+    # A saída traz a senha: fica numa variável local que morre com a função e nunca vai a log, erro ou painel.
+    $psi = [Diagnostics.ProcessStartInfo]::new('git')
+    foreach ($a in @('-c', 'core.quotepath=false', '-C', $Dir, 'credential', 'fill')) { $psi.ArgumentList.Add($a) }
+    $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+    $psi.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+    $psi.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.Environment['GIT_TERMINAL_PROMPT'] = '0'
+    $psi.Environment['GCM_INTERACTIVE'] = 'never'
+    $p = $null; $user = ''
+    try {
+        $p = [Diagnostics.Process]::Start($psi)
+        $null = $p.StandardError.ReadToEndAsync()
+        $stdout = $p.StandardOutput.ReadToEndAsync()
+        $p.StandardInput.Write($Payload)
+        $p.StandardInput.Close()
+        if ($p.WaitForExit(10000)) {
+            if ($p.ExitCode -eq 0 -and $stdout.Wait(2000)) {
+                foreach ($l in ($stdout.Result -split "`r?`n")) { if ($l.StartsWith('username=')) { $user = $l.Substring(9); break } }
+            }
+        } else { $p.Kill($true) }
+    } catch {
+        $user = ''
+    } finally {
+        if ($p -and -not $p.HasExited) { try { $p.Kill($true) } catch { } }
+        if ($p) { $p.Dispose() }
+        $stdout = $null
+    }
+    return $user
+}
+
+function Get-WtHttpsUser([string]$Url, [string]$Path, [string]$RepoRoot, [hashtable]$Cache) {
+    # Conta de uma URL http(s): pergunta ao helper da credencial, com a URL sem senha e sem caminho de token.
+    try { $u = [Uri]$Url } catch { return '_(desconhecido)_' }
+    $hostPort = if ($u.IsDefaultPort) { $u.Host } else { "$($u.Host):$($u.Port)" }
+    $urlPath = [Uri]::UnescapeDataString($u.AbsolutePath.TrimStart('/'))
+    $urlUser = if ($u.UserInfo) { [Uri]::UnescapeDataString(($u.UserInfo -split ':', 2)[0]) } else { '' }
+    $key = "$(ConvertTo-WtPathKey $RepoRoot)|$($u.Scheme)://$hostPort/$urlPath|$urlUser"
+    if ($Cache -and $Cache.ContainsKey($key)) { return $Cache[$key] }
+    $payload = "protocol=$($u.Scheme)`nhost=$hostPort`n" + $(if ($urlPath) { "path=$urlPath`n" }) +
+        $(if ($urlUser) { "username=$urlUser`n" }) + "`n"
+    $user = Invoke-WtCredentialFill $Path $payload
+    $shown = if ($user) { "``$user``" } else { '_(desconhecido)_' }
+    if ($Cache) { $Cache[$key] = $shown }
+    return $shown
+}
+
+function Get-WtPushUrl([string]$Path, [string]$Remote) {
+    # URL de push do remote (`git remote get-url --push`); se não for http(s) (DISABLED, ssh, local), a de fetch.
+    $push = Invoke-Git -Dir $Path -GitArgs @('remote', 'get-url', '--push', $Remote) -AllowFail
+    $url = if ($push.Ok -and $push.Lines.Count) { $push.Lines[0] } else { '' }
+    if ($url -notmatch '^https?://') {
+        $fetch = Invoke-Git -Dir $Path -GitArgs @('remote', 'get-url', $Remote) -AllowFail
+        $url = if ($fetch.Ok -and $fetch.Lines.Count) { $fetch.Lines[0] } else { '' }
+    }
+    return $url
+}
+
+function Get-WtCredentialUser {
+    # Conta que o git usa no push do slot (coluna Usuário): só o username da credencial. Nunca e-mail,
+    # user.name nem token. Cache opcional por chamada do painel: uma consulta ao helper por (repo, URL).
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string]$Branch = '',
+        $Prof = $null,
+        [hashtable]$Cache = $null
+    )
+    # Config e URL são do repo, não do slot: com o cache, cada repo gasta uma leitura de config e uma de URL.
+    $rk = ConvertTo-WtPathKey $RepoRoot
+    if ($Cache -and $Cache.ContainsKey("cfg|$rk")) { $cfgMap = $Cache["cfg|$rk"] }
+    else { $cfgMap = Get-WtConfigMap $Path; if ($Cache) { $Cache["cfg|$rk"] = $cfgMap } }
+    $remote = Get-WtPushRemote $cfgMap $Branch $Prof
+    if (-not $remote) { return '_(desconhecido)_' }
+    $uk = "url|$rk|$remote"
+    if ($Cache -and $Cache.ContainsKey($uk)) { $url = $Cache[$uk] }
+    else { $url = Get-WtPushUrl $Path $remote; if ($Cache) { $Cache[$uk] = $url } }
+    if ($url -match '^https?://') { return Get-WtHttpsUser $url $Path $RepoRoot $Cache }
+    if ($url -match '^ssh://([^@/]+)@') { return "``$($Matches[1])``" }
+    if ($url -match '^([^@/\\:]+)@[^/\\:]+:') { return "``$($Matches[1])``" }
+    if ($url -match '^file://|^([A-Za-z]:[\\/]|\\\\|/|\.)') { return '_(local)_' }
+    return '_(desconhecido)_'
+}
+
 function Write-WtReadme($Profiles) {
     # Regera <pool>/README.md (local) — painel único de todos os repos.
     Assert-WtPanelOwnership
@@ -496,12 +613,20 @@ function Write-WtReadme($Profiles) {
     [void]$sb.AppendLine("> Gerado em $(Get-Date -Format 'yyyy-MM-dd HH:mm'). **Não edite à mão** — rode ``$(Join-Path $sr 'Update-WtStatus.ps1')``.")
     [void]$sb.AppendLine("> Perfis: $(($Profiles.Values | ForEach-Object { "``$($_.Name)`` ($($_.Root))" }) -join ', ').")
     [void]$sb.AppendLine()
-    $head = @('Slot', 'Repo', 'Estado', 'Branch', $script:WtTicketLabel, 'Propósito') + $extra + @('Sincronia', 'Alterações locais', 'Último commit')
+    # Coluna Usuário (conta da credencial do push): logo depois de Repo; userLabel '' esconde nas duas tabelas.
+    $userCol = if ($script:WtUserLabel) { @($script:WtUserLabel) } else { @() }
+    $userCache = @{}
+    $row = { param($c) '| ' + ($c -join ' | ') + ' |' }
+    $head = @('Slot', 'Repo') + $userCol + @('Estado', 'Branch', $script:WtTicketLabel, 'Propósito') + $extra + @('Sincronia', 'Alterações locais', 'Último commit')
     [void]$sb.AppendLine('| ' + ($head -join ' | ') + ' |')
     [void]$sb.AppendLine('|' + ('---|' * $head.Count))
     foreach ($s in $slots) {
         $repo = if ($s.RepoName) { $s.RepoName } elseif ($s.Meta['repo']) { "_($($s.Meta['repo']))_" } else { '' }
         if ($s.Warning) { $repo = "$repo ⚠️ $(& $esc $s.Warning)" }
+        # Slot livre, ocupado ou sujo pertence a um repo, então mostra a conta; vazio ou bloqueado fica em branco.
+        $userCell = if (-not $script:WtUserLabel) { @() }
+            elseif ($s.RepoRoot) { @(& $esc (Get-WtCredentialUser -Path $s.Path -RepoRoot $s.RepoRoot -Branch $s.Branch -Prof $s.Profile -Cache $userCache)) }
+            else { @('') }
         $branch = if ($s.Branch) { "``$($s.Branch)``" } elseif ($s.Tree) { '_(detached)_' } else { '' }
         $changes = if ($s.Tree) {
             $t = $s.Tree
@@ -510,7 +635,7 @@ function Write-WtReadme($Profiles) {
         $since = if ($s.State -eq 'ocupado' -and $s.AttachedAt) { " _(desde $($s.AttachedAt))_" } elseif ($s.State -eq 'livre' -and $s.FreedAt) { "_(livre desde $($s.FreedAt))_" } else { '' }
         $purpose = if ($s.State -eq 'ocupado') { & $esc $s.Purpose } else { '' }
         $label = Get-WtSlotLabel $s.Name
-        $cells = @("**$($s.Name)**$(if ($label) { " _$($label)_" })", $repo, $icon[$s.State], $branch, $(if ($s.Branch) { & $esc $s.Ticket } else { '' }), "$purpose$since")
+        $cells = @("**$($s.Name)**$(if ($label) { " _$($label)_" })", $repo) + $userCell + @($icon[$s.State], $branch, $(if ($s.Branch) { & $esc $s.Ticket } else { '' }), "$purpose$since")
         $cells += $extra | ForEach-Object { if ($s.State -eq 'ocupado') { & $esc $s.Meta[$_] } else { '' } }
         $cells += @((Get-WtSync $s.Path $s.Branch $s.Profile), $changes, (& $esc $s.LastCommit))
         [void]$sb.AppendLine('| ' + ($cells -join ' | ') + ' |')
@@ -518,11 +643,16 @@ function Write-WtReadme($Profiles) {
     [void]$sb.AppendLine()
     [void]$sb.AppendLine('## Outras worktrees (fora dos slots, repos com perfil)')
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine('| Repo | Caminho | Branch | Alterações locais |')
-    [void]$sb.AppendLine('|---|---|---|---|')
+    $ohead = @('Repo') + $userCol + @('Caminho', 'Branch', 'Alterações locais')
+    [void]$sb.AppendLine('| ' + ($ohead -join ' | ') + ' |')
+    [void]$sb.AppendLine('|' + ('---|' * $ohead.Count))
     $hidden = 0
     foreach ($p in $Profiles.Values) {
-        if (-not (Test-Path $p.Root)) { [void]$sb.AppendLine("| $($p.Name) | ``$($p.Root)`` | _(checkout principal não encontrado)_ | |"); continue }
+        if (-not (Test-Path $p.Root)) {
+            $noUser = if ($script:WtUserLabel) { @('') } else { @() }
+            [void]$sb.AppendLine((& $row (@($p.Name) + $noUser + @("``$($p.Root)``", '_(checkout principal não encontrado)_', ''))))
+            continue
+        }
         foreach ($o in Get-WtWorktrees $p.Root) {
             if ((ConvertTo-WtPathKey $o.Path) -in $slotKeys) { continue }
             if ($script:WtHideWorktrees -and $o.Path -match $script:WtHideWorktrees) { $hidden++; continue }
@@ -530,7 +660,10 @@ function Write-WtReadme($Profiles) {
             $t = if (Test-Path $o.Path) { Get-WtTreeState $o.Path } else { $null }
             $c = if (-not $t) { '_(pasta ausente — `git worktree prune`?)_' } elseif ($t.Dirty) { "$($t.Modified) mod · $($t.Untracked) novos" } else { 'limpo' }
             $label = if ((ConvertTo-WtPathKey $o.Path) -eq (ConvertTo-WtPathKey $p.Root)) { ' _(checkout principal)_' } else { '' }
-            [void]$sb.AppendLine("| $($p.Name) | ``$($o.Path)``$label | $b | $c |")
+            $u = if (-not $script:WtUserLabel) { @() }
+                elseif ($t) { @(& $esc (Get-WtCredentialUser -Path $o.Path -RepoRoot $p.Root -Branch $o.Branch -Prof $p -Cache $userCache)) }
+                else { @('') }
+            [void]$sb.AppendLine((& $row (@($p.Name) + $u + @("``$($o.Path)``$label", $b, $c))))
         }
     }
     if ($hidden) {

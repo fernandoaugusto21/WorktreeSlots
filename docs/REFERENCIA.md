@@ -169,10 +169,11 @@ Gerado a cada operação. Primeira linha: o marcador `<!-- wt-panel: ... -->`. *
 um `README.md` sem o marcador** (ex.: um manifesto manual), todos os scripts recusam até que ele
 seja renomeado — o painel o sobrescreveria.
 
-| Slot | Repo | Estado | Branch | Ticket | Propósito | *extras* | Sincronia | Alterações locais | Último commit |
-|---|---|---|---|---|---|---|---|---|---|
+| Slot | Repo | Usuário | Estado | Branch | Ticket | Propósito | *extras* | Sincronia | Alterações locais | Último commit |
+|---|---|---|---|---|---|---|---|---|---|---|
 
 - **Repo** = nome do perfil, vindo do git; ⚠️ se o repo não tem perfil ou se diverge do registro.
+- **Usuário** = conta da credencial do push (seção 3.3.1); some com `"userLabel": ""`.
 - **Sincronia** = `↑ahead ↓behind` do upstream + commits fora de `<REMOTE>/<BASE>` do perfil.
 - **Alterações locais** = modificados · não rastreados · ignorados.
 - **Outras worktrees** (segunda tabela): worktrees fora dos slots de todos os repos com perfil,
@@ -180,6 +181,40 @@ seja renomeado — o painel o sobrescreveria.
   agente do Claude Code, `.claude\worktrees\*`) só são contadas.
 
 O painel é **estado**; narrativa operacional vai para outro lugar (seção 6.7).
+
+#### 3.3.1 Coluna Usuário
+
+A coluna mostra a **conta da credencial** que o `git push` de cada slot vai usar, para quem alterna
+contas entre repos ver antes do push qual identidade vai sair. Exibe só o `username` do helper de
+credencial: nunca e-mail, `user.name` nem token.
+
+- **De onde vem:** o remote do push, na ordem do git (`branch.<b>.pushRemote` → `remote.pushDefault` →
+  `branch.<b>.remote` → `origin` → `Remote` do perfil). A URL é a de `git remote get-url --push`; se não
+  for `http(s)` (ex.: `DISABLED`), usa-se a de fetch do mesmo remote.
+- **https:** `git credential fill` na pasta do slot, sem prompt (`GIT_TERMINAL_PROMPT=0`,
+  `GCM_INTERACTIVE=never`) e com limite de 10 s. Só a linha `username=` é usada. A senha que o helper
+  devolve é descartada: não entra no painel, em log, em erro nem em variável que sobreviva à consulta.
+- **ssh:** o usuário da URL (`ssh://user@host/...` ou `user@host:...`). **Caminho local ou `file://`:**
+  `_(local)_`. Sem usuário na URL, ou helper sem `username`: `_(desconhecido)_`.
+- **Quem tem conta:** slot livre, ocupado ou sujo (pertence a um repo). Slot vazio e bloqueado ficam em
+  branco. A segunda tabela mostra a conta de cada worktree listada.
+- **Cache:** por chamada do painel, a config e a URL são lidas uma vez por repo, e o helper é consultado
+  uma vez por (repo, URL). Slots do mesmo repo não repetem a consulta.
+- **Como esconder ou trocar o cabeçalho:** `"userLabel": ""` em `wt.config.json` tira a coluna das duas
+  tabelas; `"userLabel": "User"` troca o texto do cabeçalho.
+
+Trecho do painel gerado no sandbox de teste (`tests/Test-User.ps1`, configuração padrão; colunas de
+Slot a Branch, com caminhos e colunas finais omitidos):
+
+| Slot | Repo | Usuário | Estado | Branch |
+|---|---|---|---|---|
+| **g1** | web | `alice` | 🔵 ocupado | `fb-web-1` |
+| **g2** | web | `alice` | 🟢 livre | _(detached)_ |
+| **g3** | alpha | _(local)_ | 🔵 ocupado | `fb-alpha-1` |
+| **g5** | sshrepo | `carol` | 🔵 ocupado | `fb-ssh` |
+| **g6** | nohelper | _(desconhecido)_ | 🔵 ocupado | `fb-nh` |
+| **g7** |  ⚠️ pasta existe, não é worktree e não está vazia |  | ❌ bloqueado |  |
+| **g8** |  |  | ⚪ vazio |  |
 
 ### 3.4 Registro `<pool>\.slots.json`
 
@@ -342,6 +377,7 @@ CONFIGURAÇÃO GLOBAL do `WtCommon.ps1`.
 | `lockTimeoutSec` | `60` | Espera máxima pelo lock. |
 | `scriptsLabel` | pasta dos scripts | Só para os textos do painel. |
 | `ticketLabel` | `Ticket` | Cabeçalho da coluna do id extraído por `TicketFromBranch`. |
+| `userLabel` | `Usuário` | Cabeçalho da coluna da conta da credencial (seção 3.3.1); `""` esconde a coluna nas duas tabelas. |
 | `slotPolicy` | sem faixas | Faixas por tipo de branch (2.6): lista de `{ "label", "pattern", "slots" }`. |
 | `slotPolicyStrict` | `true` | Branch sem regra: `true` recusa, `false` libera qualquer slot. |
 | `engineDir` | — | Ignorado pelo motor; serve a atalhos que moram fora da pasta dele e precisam achá-lo. |

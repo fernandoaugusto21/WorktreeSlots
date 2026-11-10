@@ -51,6 +51,7 @@ scripts. Caminhos relativos valem a partir da pasta do JSON. Chave desconhecida 
 | `slotPrefix` / `slotCount` | `g` / `7` | Nomes dos slots |
 | `slotPolicy` / `slotPolicyStrict` | sem faixas / `true` | Faixas de slot por tipo de branch (seção 2.6 da referência) |
 | `ticketLabel` | `Ticket` | Cabeçalho da coluna do id extraído por `TicketFromBranch` |
+| `userLabel` | `Usuário` | Cabeçalho da coluna com a conta da credencial do push (`""` esconde a coluna) |
 | `scriptsLabel` | pasta dos scripts | Caminho mostrado nos textos do painel |
 | `hideWorktrees` / `lockTimeoutSec` | worktrees de agente / `60` | Ver bloco CONFIGURAÇÃO GLOBAL |
 | `engineDir` | — | Ignorado pelo motor: serve a atalhos que moram fora da pasta dele e precisam achá-lo |
@@ -75,6 +76,7 @@ uma worktree de slot). Detalhes e parâmetros em `docs/REFERENCIA.md`, seção 3
 pwsh tests\Test-Detach.ps1 -Engine .\tools\wt -Sandbox <pasta-nova-vazia>
 pwsh tests\Test-Config.ps1 -Engine .\tools\wt -Sandbox <outra-pasta-nova-vazia>
 pwsh tests\Test-Pool.ps1   -Engine .\tools\wt -Sandbox <mais-uma-pasta-nova-vazia>
+pwsh tests\Test-User.ps1   -Engine .\tools\wt -Sandbox <outra-pasta-nova-vazia>
 ```
 
 Cada teste cria um pool e repositórios com remoto bare (e submódulo, no primeiro), tudo dentro de
@@ -84,10 +86,18 @@ Cada teste cria um pool e repositórios com remoto bare (e submódulo, no primei
 
 **Testado rodando** (PowerShell 7, Git for Windows, Windows 11), todas as verificações passando.
 
-`tests/Test-Config.ps1`, 6 verificações: `WT_CONFIG` define pool, perfis e faixa (C1); nome da
+`tests/Test-Config.ps1`, 9 verificações: `WT_CONFIG` define pool, perfis e faixa (C1); nome da
 coluna e id extraído no painel (C2); branch fora da faixa recusada (C3); branch sem regra recusada
 no modo estrito (C4); chave desconhecida no JSON recusada (C5); `wt.config.json` ao lado dos
-scripts, sem `WT_CONFIG` (C6).
+scripts, sem `WT_CONFIG` (C6); coluna Usuário com o padrão (C7), com `userLabel` custom (C8) e
+vazio, que esconde a coluna (C9).
+
+`tests/Test-User.ps1`, 18 verificações (U0–U17): coluna Usuário com helper https de teste (U2),
+slot livre (U3), remoto local (U4), `pushRemote` vencendo o `origin` (U5), ssh (U6), helper sem
+usuário (U7), slot vazio e bloqueado em branco (U8), worktrees de fora do pool (U9–U11), cache por
+chamada (U12), painel repetível (U13), senha nunca exibida (U14), `userLabel` custom e vazio
+(U15–U16) e colunas consistentes (U17). Roda o git sem a config global da máquina
+(`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` apontando para um arquivo vazio do sandbox).
 
 `tests/Test-Detach.ps1`, 8 verificações:
 
