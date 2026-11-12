@@ -143,9 +143,9 @@ argumento posicional — sobra de argumento é erro, nunca vai parar noutro par�
 | `WtCommon.ps1` | CONFIGURAÇÃO GLOBAL + núcleo (dot-source): perfis, lock, registro, estado, harvest, conversão, painel. |
 | `Attach-WtSlot.ps1 -Branch <b> [-Repo <r>] [-Slot gN] [-Base <B>] [-Purpose "..."] [-Ticket <id>] [-Meta 'k1=v1;k2=v2'] [-Convert]` | Ocupa slot (ou adota/atualiza o que já está nele). Sem `-Repo`, infere pelo diretório corrente. |
 | `Detach-WtSlot.ps1 -Slot gN \| -Branch <b> [-Stash] [-DeleteBranch] [-NoHarvest] [-CleanIgnored]` | Libera slot → livre@repo (afinidade mantida). |
-| `Convert-WtSlot.ps1 -Slot gN -Repo <r> \| -Empty` | Muda a afinidade de um slot livre (ou provisiona um vazio). |
+| `Convert-WtSlot.ps1 -Slot gN -Repo <r> \| -Empty` | Muda a afinidade de um slot livre (ou provisiona um vazio). Sem conversão a fazer (já livre@repo, já vazio), só regera o painel. |
 | `Move-WtSlot.ps1 -From gN -To gM` | Move a worktree (com alterações locais) para um slot vazio, levando o registro. |
-| `Update-WtStatus.ps1` | Fetch de todos os repos com perfil + regera o painel. |
+| `Update-WtStatus.ps1` | Fetch de todos os repos com perfil + regera o painel. Também imprime um resumo por slot no console, com a coluna Usuário em texto puro (mesmo cache do painel). |
 
 ### 3.2 Perfis (`profiles\<repo>.ps1`)
 
