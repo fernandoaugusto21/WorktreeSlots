@@ -38,8 +38,9 @@ Invoke-WtLocked {
     if ($target.State -notin 'livre', 'vazio') {
         throw "Slot $Slot não pode ser convertido (estado: $($target.State)$(if ($target.Branch) { ", branch '$($target.Branch)'" })). Só livre ou vazio."
     }
-    if ($prof -and $target.State -eq 'livre' -and $target.RepoName -eq $prof.Name) { Write-Host "Slot $Slot já é livre@$($prof.Name)."; return }
-    if ($Empty -and $target.State -eq 'vazio') { Write-Host "Slot $Slot já está vazio."; return }
+    # Sem conversão a fazer: o painel é regerado mesmo assim (pode ter sido escrito por outra versão do motor).
+    if ($prof -and $target.State -eq 'livre' -and $target.RepoName -eq $prof.Name) { Write-Host "Slot $Slot já é livre@$($prof.Name)."; Write-Host "Painel: $(Write-WtReadme $profiles)"; return }
+    if ($Empty -and $target.State -eq 'vazio') { Write-Host "Slot $Slot já está vazio."; Write-Host "Painel: $(Write-WtReadme $profiles)"; return }
 
     $from = if ($target.State -eq 'livre') { "livre@$(if ($target.RepoName) { $target.RepoName } else { $target.RepoRoot })" } else { 'vazio' }
     if ($target.State -eq 'livre') { Remove-WtSlotWorktree $target }
