@@ -1,8 +1,10 @@
 #Requires -Version 7
 # Sandbox: coluna Usuário (conta da credencial do push) no painel. Cobre remoto https com helper de teste
 # local ao repo (que conta as consultas), ssh, remoto local, pushRemote diferente do remote, helper sem
-# usuário, cache por chamada, estados (ocupado, livre, vazio, bloqueado), a 2ª tabela, e userLabel custom
-# e vazio. O git roda sem a config global da máquina (GIT_CONFIG_NOSYSTEM=1 e GIT_CONFIG_GLOBAL apontando
+# usuário, cache por chamada, estados (ocupado, livre, vazio, bloqueado), a 2ª tabela, userLabel custom
+# e vazio, a coluna regerada por cada operação (Attach, Detach, Move, Convert sem efeito) por cima de um
+# painel antigo e a tabela do console do Update-WtStatus.
+# O git roda sem a config global da máquina (GIT_CONFIG_NOSYSTEM=1 e GIT_CONFIG_GLOBAL apontando
 # para um arquivo vazio do sandbox). Não toca em nada fora de -Sandbox.
 param([Parameter(Mandatory)][string]$Engine, [Parameter(Mandatory)][string]$Sandbox)
 $ErrorActionPreference = 'Stop'
@@ -128,6 +130,33 @@ Check 'U16' 'userLabel "": coluna escondida nas duas tabelas' ($ue.Exit -eq 0 -a
 
 $env:WT_CONFIG = Join-Path $cfgDir 'base.json'
 Check 'U17' 'colunas consistentes: cada tabela tem o número de | do próprio cabeçalho (padrão, custom e vazio)' ((PipeCounts $p2).Count -eq 2 -and (PipeCounts $pc).Count -eq 2 -and (PipeCounts $pe).Count -eq 2) ("padrão=" + ((PipeCounts $p2) -join ',') + " custom=" + ((PipeCounts $pc) -join ',') + " vazio=" + ((PipeCounts $pe) -join ','))
+
+# Toda operação regera o painel com a coluna, inclusive por cima de um painel escrito por um motor sem ela
+# (mesmo marcador, cabeçalho antigo) e nos retornos do Convert sem conversão a fazer.
+$marker = (Get-Content "$pool\README.md" -TotalCount 1)
+function Set-StalePanel { Set-Content "$pool\README.md" -Encoding utf8NoBOM -Value "$marker`n# painel antigo`n`n| Slot | Repo | Estado |`n|---|---|---|" }
+function HasUserHeader([string]$Text) { $Text -match '\| Slot \| Repo \| Usuário \| Estado \|' -and $Text -match '\| Repo \| Usuário \| Caminho \|' -and $Text -notmatch 'painel antigo' }
+
+Set-StalePanel; $c1 = Run 'Convert-WtSlot.ps1' @('-Slot', 'g2', '-Repo', 'web', '-NoFetch'); $q = Panel
+Check 'U18' 'Convert sem conversão (já livre@repo) regera o painel com a coluna' ($c1.Exit -eq 0 -and $c1.Out -match 'já é livre@web' -and (HasUserHeader $q) -and (SlotRow $q 'g2') -match '\| web \| `alice` \| 🟢 livre') ($c1.Out + "`n" + $q)
+Set-StalePanel; $c2 = Run 'Convert-WtSlot.ps1' @('-Slot', 'g8', '-Empty', '-NoFetch'); $q = Panel
+Check 'U19' 'Convert sem conversão (já vazio) regera o painel com a coluna' ($c2.Exit -eq 0 -and $c2.Out -match 'já está vazio' -and (HasUserHeader $q) -and (SlotRow $q 'g8') -match '\*\*g8\*\* \|  \|  \| ⚪ vazio') ($c2.Out + "`n" + $q)
+Set-StalePanel; $m1 = Run 'Move-WtSlot.ps1' @('-From', 'g3', '-To', 'g8'); $q = Panel
+Check 'U20' 'Move regera o painel com a coluna (slot destino com a conta)' ($m1.Exit -eq 0 -and (HasUserHeader $q) -and (SlotRow $q 'g8') -match '\| alpha \| _\(local\)_ \| 🔵 ocupado' -and (SlotRow $q 'g3') -match '\*\*g3\*\* \|  \|  \| ⚪ vazio') ($m1.Out + "`n" + $q)
+Set-StalePanel; $d1 = Run 'Detach-WtSlot.ps1' @('-Slot', 'g1', '-NoFetch'); $q = Panel
+Check 'U21' 'Detach regera o painel com a coluna' ($d1.Exit -eq 0 -and (HasUserHeader $q) -and (SlotRow $q 'g1') -match '\| web \| `alice` \| 🟢 livre') ($d1.Out + "`n" + $q)
+Set-StalePanel; $a1 = Run 'Attach-WtSlot.ps1' @('-Repo', 'web', '-Branch', 'fb-web-1', '-Slot', 'g1', '-NoFetch'); $q = Panel
+Check 'U22' 'Attach regera o painel com a coluna' ($a1.Exit -eq 0 -and (HasUserHeader $q) -and (SlotRow $q 'g1') -match '\| web \| `alice` \| 🔵 ocupado') ($a1.Out + "`n" + $q)
+
+# Console do Update: mesma coluna (texto puro) e o mesmo cache do painel (uma consulta por (repo, URL)).
+Remove-Item $callsWeb, $callsNo -ErrorAction SilentlyContinue
+$uk = Run 'Update-WtStatus.ps1' @('-NoFetch')
+$ukPlain = $uk.Out -replace "\e\[[0-9;]*m", ''   # o cabeçalho do Format-Table sai colorido
+$hdr = Lines $ukPlain | Where-Object { $_ -match '^\s*Name\s' } | Select-Object -First 1
+$g1c = Lines $ukPlain | Where-Object { $_ -match '^\s*g1\s' } | Select-Object -First 1
+Check 'U23' 'Update: tabela do console com a coluna Usuário (texto puro) e cache compartilhado com o painel' ($uk.Exit -eq 0 -and $hdr -match '^\s*Name\s+Repo\s+Usuário\s+State' -and $g1c -match '^\s*g1\s+web\s+alice\s' -and $uk.Out -notmatch '`alice`' -and (Calls $callsWeb) -eq 1 -and (Calls $callsNo) -eq 1) ("calls web=$(Calls $callsWeb) nohelper=$(Calls $callsNo)`n" + $uk.Out)
+$allText = ($outs) -join "`n"
+Check 'U24' 'senha e conta do helper sem usuário nunca aparecem (operações e console)' ($allText -notmatch 'segredo' -and $allText -notmatch 'sem-usuario') ''
 
 $results | Format-Table Id, Ok, Desc -AutoSize | Out-String -Width 200
 $results | Where-Object Ok -ne 'OK' | ForEach-Object { "---- $($_.Id)`n$($_.Detail)" }

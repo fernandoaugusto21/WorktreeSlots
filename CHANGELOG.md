@@ -7,7 +7,14 @@
   depois de Repo nas duas tabelas. O cabeçalho vem de `userLabel` em `wt.config.json` (padrão `Usuário`;
   `""` esconde a coluna). Só o username é exibido: nunca e-mail, `user.name` nem a senha do helper.
   Uma consulta ao helper por (repo, URL) por painel.
-- Testes: `tests/Test-User.ps1` (U0–U17, 18 verificações); `tests/Test-Config.ps1` ganha C7–C9
+- **Corrigido — painel desatualizado no `Convert` sem efeito:** `Convert-WtSlot` com o slot já livre
+  no repo pedido, ou já vazio com `-Empty`, saía sem regerar o painel. Um painel escrito por outra versão
+  do motor (por exemplo, sem a coluna Usuário) continuava assim. Agora regera também nesses casos.
+- **Novo — coluna Usuário no console:** a tabela que o `Update-WtStatus` imprime ganha a coluna (texto
+  puro: `alice`, `(local)`), logo depois de Repo, e some com `userLabel` vazio. Console e painel
+  compartilham o cache: continua uma consulta ao helper por (repo, URL).
+- Testes: `tests/Test-User.ps1` (U0–U24, 25 verificações; U18–U24 cobrem a coluna depois de cada
+  operação e no console); `tests/Test-Config.ps1` ganha C7–C9
   (padrão, `userLabel` custom e vazio).
 
 ## [0.1.0] — não publicada

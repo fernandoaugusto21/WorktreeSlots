@@ -596,8 +596,16 @@ function Get-WtCredentialUser {
     return '_(desconhecido)_'
 }
 
-function Write-WtReadme($Profiles) {
-    # Regera <pool>/README.md (local) — painel único de todos os repos.
+function ConvertTo-WtPlainUser([string]$Cell) {
+    # Célula da coluna Usuário em markdown -> texto do console: `alice` -> alice, _(local)_ -> (local).
+    if ($Cell -match '^`(.*)`$') { return $Matches[1] }
+    if ($Cell -match '^_(\(.*\))_$') { return $Matches[1] }
+    return $Cell
+}
+
+function Write-WtReadme($Profiles, [hashtable]$UserCache = $null) {
+    # Regera <pool>/README.md (local) — painel único de todos os repos. -UserCache: cache da coluna Usuário
+    # compartilhado com quem já consultou as contas (ex.: a tabela do console do Update-WtStatus).
     Assert-WtPanelOwnership
     $slots = @(Get-WtSlotInfo $Profiles)
     $slotKeys = $slots | ForEach-Object { ConvertTo-WtPathKey $_.Path }
@@ -615,7 +623,7 @@ function Write-WtReadme($Profiles) {
     [void]$sb.AppendLine()
     # Coluna Usuário (conta da credencial do push): logo depois de Repo; userLabel '' esconde nas duas tabelas.
     $userCol = if ($script:WtUserLabel) { @($script:WtUserLabel) } else { @() }
-    $userCache = @{}
+    $userCache = if ($null -ne $UserCache) { $UserCache } else { @{} }
     $row = { param($c) '| ' + ($c -join ' | ') + ' |' }
     $head = @('Slot', 'Repo') + $userCol + @('Estado', 'Branch', $script:WtTicketLabel, 'Propósito') + $extra + @('Sincronia', 'Alterações locais', 'Último commit')
     [void]$sb.AppendLine('| ' + ($head -join ' | ') + ' |')

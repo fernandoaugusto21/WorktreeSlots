@@ -92,11 +92,13 @@ no modo estrito (C4); chave desconhecida no JSON recusada (C5); `wt.config.json`
 scripts, sem `WT_CONFIG` (C6); coluna Usuário com o padrão (C7), com `userLabel` custom (C8) e
 vazio, que esconde a coluna (C9).
 
-`tests/Test-User.ps1`, 18 verificações (U0–U17): coluna Usuário com helper https de teste (U2),
+`tests/Test-User.ps1`, 25 verificações (U0–U24): coluna Usuário com helper https de teste (U2),
 slot livre (U3), remoto local (U4), `pushRemote` vencendo o `origin` (U5), ssh (U6), helper sem
 usuário (U7), slot vazio e bloqueado em branco (U8), worktrees de fora do pool (U9–U11), cache por
 chamada (U12), painel repetível (U13), senha nunca exibida (U14), `userLabel` custom e vazio
-(U15–U16) e colunas consistentes (U17). Roda o git sem a config global da máquina
+(U15–U16), colunas consistentes (U17), painel regerado com a coluna por cima de um painel antigo em
+cada operação (Convert sem conversão a fazer, Move, Detach e Attach: U18–U22), tabela do console do
+`Update-WtStatus` com a coluna e o mesmo cache do painel (U23) e senha ausente das saídas (U24). Roda o git sem a config global da máquina
 (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` apontando para um arquivo vazio do sandbox).
 
 `tests/Test-Detach.ps1`, 8 verificações:

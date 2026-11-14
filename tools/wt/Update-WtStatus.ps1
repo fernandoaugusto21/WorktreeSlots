@@ -19,9 +19,14 @@ if (-not $NoFetch) {
 }
 
 Invoke-WtLocked {
-    Get-WtSlotInfo $profiles |
-        Select-Object Name, @{ n = 'Repo'; e = { $_.RepoName } }, State, Branch, Ticket, Purpose,
-            @{ n = 'Dirty'; e = { if ($_.Tree) { $_.Tree.Dirty } } }, Warning |
-        Format-Table -AutoSize | Out-Host
-    Write-Host "Painel: $(Write-WtReadme $profiles)"
+    # Mesmo cache da coluna Usuário para o console e o painel: uma consulta ao helper por (repo, URL).
+    $userCache = @{}
+    $cols = @('Name', @{ n = 'Repo'; e = { $_.RepoName } })
+    if ($script:WtUserLabel) {
+        $cols += @{ n = $script:WtUserLabel; e = {
+            if ($_.RepoRoot) { ConvertTo-WtPlainUser (Get-WtCredentialUser -Path $_.Path -RepoRoot $_.RepoRoot -Branch $_.Branch -Prof $_.Profile -Cache $userCache) } else { '' } } }
+    }
+    $cols += @('State', 'Branch', 'Ticket', 'Purpose', @{ n = 'Dirty'; e = { if ($_.Tree) { $_.Tree.Dirty } } }, 'Warning')
+    Get-WtSlotInfo $profiles | Select-Object $cols | Format-Table -AutoSize | Out-Host
+    Write-Host "Painel: $(Write-WtReadme $profiles $userCache)"
 }
